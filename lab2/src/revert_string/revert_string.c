@@ -3,7 +3,7 @@
 
 // метод, который переворачивает строку
 
-void RevertString(char *str)
+void RevertString(char *str)    
 {
     int left = 0;
     int right = strlen(str) - 1;
