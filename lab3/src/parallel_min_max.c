@@ -1,155 +1,119 @@
-#include <ctype.h>
-#include <limits.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-
-#include <sys/time.h>
-#include <sys/types.h>
 #include <sys/wait.h>
-
-#include <getopt.h>
+#include <string.h>
 
 #include "find_min_max.h"
 #include "utils.h"
 
+// Завершить программу parallel_min_max.c, так, чтобы задача нахождения минимума и максимума в массиве 
+// решалась параллельно. Если выставлен аргумент by_files для синхронизации процессов использовать файлы (задание 2), 
+// в противном случае использовать pipe (задание 3).
+
 int main(int argc, char **argv) {
-  int seed = -1;
-  int array_size = -1;
-  int pnum = -1;
-  bool with_files = false;
-
-  while (true) {
-    int current_optind = optind ? optind : 1;
-
-    static struct option options[] = {{"seed", required_argument, 0, 0},
-                                      {"array_size", required_argument, 0, 0},
-                                      {"pnum", required_argument, 0, 0},
-                                      {"by_files", no_argument, 0, 'f'},
-                                      {0, 0, 0, 0}};
-
-    int option_index = 0;
-    int c = getopt_long(argc, argv, "f", options, &option_index);
-
-    if (c == -1) break;
-
-    switch (c) {
-      case 0:
-        switch (option_index) {
-          case 0:
-            seed = atoi(optarg);
-            // your code here
-            // error handling
-            break;
-          case 1:
-            array_size = atoi(optarg);
-            // your code here
-            // error handling
-            break;
-          case 2:
-            pnum = atoi(optarg);
-            // your code here
-            // error handling
-            break;
-          case 3:
-            with_files = true;
-            break;
-
-          defalut:
-            printf("Index %d is out of options\n", option_index);
-        }
-        break;
-      case 'f':
-        with_files = true;
-        break;
-
-      case '?':
-        break;
-
-      default:
-        printf("getopt returned character code 0%o?\n", c);
-    }
+  // Проверяем количество аргументов командной строки
+  // argv[0] - имя программы
+  // argv[1] - seed для генератора случайных чисел
+  // argv[2] - размер массива
+  // argv[3] - опциональный флаг --by_files для выбора способа синхронизации
+  if (argc != 3 && argc != 4) {
+    printf("Usage: %s seed arraysize [--by_files]\n", argv[0]);
+    return 1; 
   }
 
-  if (optind < argc) {
-    printf("Has at least one no option argument\n");
-    return 1;
+  int seed = atoi(argv[1]); 
+  if (seed <= 0) {
+    printf("seed is a positive number\n");
+    return 1; 
   }
 
-  if (seed == -1 || array_size == -1 || pnum == -1) {
-    printf("Usage: %s --seed \"num\" --array_size \"num\" --pnum \"num\" \n",
-           argv[0]);
-    return 1;
+  int array_size = atoi(argv[2]);   
+  if (array_size <= 0) {
+    printf("array_size is a positive number\n");
+    return 1; 
   }
 
-  int *array = malloc(sizeof(int) * array_size);
+  // Флаг для выбора способа синхронизации между процессами: 0 - использовать pipe, 1 - использовать файлы 
+  int use_files = 0;
+
+  if (argc == 4 && strcmp(argv[3], "--by_files") == 0) {
+    use_files = 1; 
+  }
+
+  int *array = malloc(array_size * sizeof(int));
+
   GenerateArray(array, array_size, seed);
-  int active_child_processes = 0;
 
-  struct timeval start_time;
-  gettimeofday(&start_time, NULL);
-
-  for (int i = 0; i < pnum; i++) {
-    pid_t child_pid = fork();
-    if (child_pid >= 0) {
-      // successful fork
-      active_child_processes += 1;
-      if (child_pid == 0) {
-        // child process
-
-        // parallel somehow
-
-        if (with_files) {
-          // use files here
-        } else {
-          // use pipe here
-        }
-        return 0;
-      }
-
+  unsigned int mid = array_size / 2;  // точка разделения между процессами
+  
+  pid_t pid = fork();  // fork() - создание нового процесса
+  
+  if (pid == 0) {
+    // === ДОЧЕРНИЙ ПРОЦЕСС ===
+    
+    struct MinMax min_max = GetMinMax(array, 0, mid);
+    
+    if (use_files) {
+      FILE *file = fopen("child_result.txt", "w");  
+      fprintf(file, "%d %d", min_max.min, min_max.max);
+      fclose(file);
     } else {
-      printf("Fork failed!\n");
-      return 1;
+
+      // Создаем pipe (канал для межпроцессного взаимодействия)
+      // fd[0] - дескриптор для чтения, fd[1] - дескриптор для записи
+      int fd[2];
+      pipe(fd);
+      
+      write(fd[1], &min_max.min, sizeof(int));  
+      write(fd[1], &min_max.max, sizeof(int));  
+  
+      close(fd[1]);
     }
-  }
+    
+    
+    exit(0);    // Завершаем дочерний процесс
+  } else {
+    // === РОДИТЕЛЬСКИЙ ПРОЦЕСС ===
+    
+    struct MinMax parent_min_max = GetMinMax(array, mid, array_size);
 
-  while (active_child_processes > 0) {
-    // your code here
-
-    active_child_processes -= 1;
-  }
-
-  struct MinMax min_max;
-  min_max.min = INT_MAX;
-  min_max.max = INT_MIN;
-
-  for (int i = 0; i < pnum; i++) {
-    int min = INT_MAX;
-    int max = INT_MIN;
-
-    if (with_files) {
-      // read from files
+    struct MinMax child_min_max;
+    
+    if (use_files) {
+      // Ждем завершения дочернего процесса с помощью wait()
+      // NULL означает, что нам не нужна дополнительная информация о статусе
+      wait(NULL);
+      
+      FILE *file = fopen("child_result.txt", "r");
+      fscanf(file, "%d %d", &child_min_max.min, &child_min_max.max);
+      fclose(file);
+      remove("child_result.txt");
     } else {
-      // read from pipes
+      // Создаем pipe для получения данных от дочернего процесса
+      int fd[2];
+      pipe(fd);
+      
+      // Ждем завершения дочернего процесса
+      wait(NULL);
+      
+
+      read(fd[0], &child_min_max.min, sizeof(int));  
+      read(fd[0], &child_min_max.max, sizeof(int)); 
+
+      close(fd[0]);
     }
+    
+    struct MinMax final_min_max;
+    final_min_max.min = (parent_min_max.min < child_min_max.min) ? parent_min_max.min : child_min_max.min;
+    final_min_max.max = (parent_min_max.max > child_min_max.max) ? parent_min_max.max : child_min_max.max;
+    
 
-    if (min < min_max.min) min_max.min = min;
-    if (max > min_max.max) min_max.max = max;
+    printf("min: %d\n", final_min_max.min);
+    printf("max: %d\n", final_min_max.max);
+
+    free(array);
+
+    return 0;
   }
-
-  struct timeval finish_time;
-  gettimeofday(&finish_time, NULL);
-
-  double elapsed_time = (finish_time.tv_sec - start_time.tv_sec) * 1000.0;
-  elapsed_time += (finish_time.tv_usec - start_time.tv_usec) / 1000.0;
-
-  free(array);
-
-  printf("Min: %d\n", min_max.min);
-  printf("Max: %d\n", min_max.max);
-  printf("Elapsed time: %fms\n", elapsed_time);
-  fflush(NULL);
-  return 0;
 }
