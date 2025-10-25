@@ -1,53 +1,59 @@
-
-/* Program to display address information about the process */
-/* Adapted from Gray, J., program 1.4 */
+/* Программа для отображения информации о адресах в процессе */
+/* Адаптировано из Gray, J., program 1.4 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-/* Below is a macro definition */
-#define SHW_ADR(ID, I) (printf("ID %s \t is at virtual address: %8X\n", ID, &I))
+/* Ниже приведено определение макроса */
+#define SHW_ADR(ID, I) (printf("Идентификатор %s \t находится по виртуальному адресу: %8X\n", ID, &I))
 
-extern int etext, edata, end; /* Global variables for process
-                                 memory */
+// Объявление внешних переменных, определенных компоновщиком (линкером)
+// Эти переменные указывают на границы сегментов памяти процесса
+extern int etext, edata, end; /* Глобальные переменные для памяти процесса */
 
-char *cptr = "This message is output by the function showit()\n"; /* Static */
-char buffer1[25];
-int showit(); /* Function prototype */
+char *cptr = "Это сообщение выводится функцией showit()\n"; /* Статическая переменная */
+char buffer1[25]; // Статический массив
+int showit(); /* Прототип функции */
 
-main() {
-  int i = 0; /* Automatic variable */
+int main() {
+  int i = 0; /* Автоматическая переменная (в стеке) */
 
-  /* Printing addressing information */
-  printf("\nAddress etext: %8X \n", &etext);
-  printf("Address edata: %8X \n", &edata);
-  printf("Address end  : %8X \n", &end);
+  /* Вывод информации о адресах */
+  // Вывод адресов границ сегментов памяти
+  printf("\nАдрес etext: %8X \n", &etext);  // Конец сегмента кода (текстовый сегмент)
+  printf("Адрес edata: %8X \n", &edata);    // Конец сегмента инициализированных данных
+  printf("Адрес end  : %8X \n", &end);      // Конец сегмента неинициализированных данных (BSS)
 
-  SHW_ADR("main", main);
-  SHW_ADR("showit", showit);
-  SHW_ADR("cptr", cptr);
-  SHW_ADR("buffer1", buffer1);
-  SHW_ADR("i", i);
-  strcpy(buffer1, "A demonstration\n");   /* Library function */
-  write(1, buffer1, strlen(buffer1) + 1); /* System call */
+  // Вывод адресов различных объектов в памяти
+  SHW_ADR("main", main);      // Адрес функции main (в сегменте кода)
+  SHW_ADR("showit", showit);  // Адрес функции showit (в сегменте кода)
+  SHW_ADR("cptr", cptr);      // Адрес указателя на строку (в сегменте данных)
+  SHW_ADR("buffer1", buffer1); // Адрес статического массива (в сегменте BSS)
+  SHW_ADR("i", i);            // Адрес локальной переменной (в стеке)
+  
+  strcpy(buffer1, "Демонстрация работы\n");   // Копирование строки в буфер
+  write(1, buffer1, strlen(buffer1) + 1); // Системный вызов для вывода
   showit(cptr);
 
-} /* end of main function */
+  return 0;
+} /* конец функции main */
 
-/* A function follows */
-int showit(p) char *p;
-{
-  char *buffer2;
+/* Следующая функция */
+int showit(char *p) {
+  char *buffer2; // Локальная переменная (располагается в стеке)
   SHW_ADR("buffer2", buffer2);
+  
+  // Выделение памяти в куче (heap)
   if ((buffer2 = (char *)malloc((unsigned)(strlen(p) + 1))) != NULL) {
-    printf("Alocated memory at %X\n", buffer2);
-    strcpy(buffer2, p);    /* copy the string */
-    printf("%s", buffer2); /* Didplay the string */
-    free(buffer2);         /* Release location */
+    printf("Память выделена по адресу %X\n", buffer2);
+    strcpy(buffer2, p);    // Копирование строки
+    printf("%s", buffer2); // Вывод строки
+    free(buffer2);         // Освобождение памяти
   } else {
-    printf("Allocation error\n");
+    printf("Ошибка выделения памяти\n");
     exit(1);
   }
+  return 0;
 }
